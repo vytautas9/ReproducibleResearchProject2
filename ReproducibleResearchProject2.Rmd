@@ -1,0 +1,134 @@
+---
+title: "Analysis of NOAA storm database"
+author: "Vytautas Kraujalis"
+date: '2020-06-20'
+output: html_document
+---
+
+# Synopsis
+
+This project involves exploring the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.
+
+Our analysis will address the following questions:
+- Across the United States, which types of events (as indicated in the EVTYPE are most harmful with respect to population health?
+- Across the United States, which types of events have the greatest economic consequences?
+
+# Data Processing
+
+## Download and load the data
+```{r}
+url <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+download.file(url, destfile = "data.csv.bz2")
+
+stormData <- read.csv("data.csv.bz2")
+```
+
+## Take a look at the data
+```{r}
+colnames(stormData)
+
+head(stormData)
+```
+
+## Keep only necessary columns for this analysis
+```{r}
+library(dplyr)
+stormDataFiltered <- stormData %>% select(EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP)
+```
+
+## Subset the data set to economic and health impact
+```{r}
+#Make column names lower case
+stormDataFiltered <- stormDataFiltered %>% rename_all(tolower)
+
+#We are interested in events that had negative impact on economic or health factors
+stormDataFiltered <- stormDataFiltered %>% filter(evtype != "?" & (fatalities > 0 | injuries > 0 | propdmg > 0 | cropdmg > 0))
+```
+
+## Relevel the factor levels for new subset
+```{r}
+stormDataFiltered$evtype <- factor(stormDataFiltered$evtype)
+```
+
+## Creating multipliers column
+```{r}
+Exp <-  c("\"\"" = 10^0,
+          "?" = 10^0,
+          "-" = 10^0, 
+          "+" = 10^0,
+          "0" = 10^0,
+          "1" = 10^1,
+          "2" = 10^2,
+          "3" = 10^3,
+          "4" = 10^4,
+          "5" = 10^5,
+          "6" = 10^6,
+          "7" = 10^7,
+          "8" = 10^8,
+          "9" = 10^9,
+          "H" = 10^2,
+          "K" = 10^3,
+          "M" = 10^6,
+          "B" = 10^9)
+stormDataFiltered <- stormDataFiltered %>% mutate(propdmgexp = Exp[as.character(propdmgexp)], cropdmgexp = Exp[as.character(cropdmgexp)])
+```
+
+## Calculate the damage, fatalities and injuries
+```{r}
+stormDataFiltered <- stormDataFiltered %>% mutate(propDamage = propdmg * propdmgexp, cropDamage = cropdmg * cropdmgexp)
+```
+
+## Subset for health impact
+```{r}
+health <- stormDataFiltered %>% select(evtype, fatalities, injuries)
+
+TotalHealth <- health %>% group_by(evtype) %>% summarise(TotalInjuries = sum(injuries, na.rm = TRUE), TotalFatalities = sum(fatalities, na.rm = TRUE), Total = TotalInjuries + TotalFatalities)
+```
+
+### Remove events with 0 total fatalities/injuries and sort the subset by desc Total
+```{r}
+TotalHealth <- TotalHealth %>% filter(Total > 0) %>% arrange(desc(Total))
+
+#Fix the factor variable
+TotalHealth$evtype <- factor(TotalHealth$evtype)
+
+#Subset only top 5
+TotalHealthTop <- TotalHealth[1:5,]
+```
+
+## Subset for economic impact
+```{r}
+economic <- stormDataFiltered %>% select(evtype, propDamage, cropDamage)
+
+TotalEconomic <- economic %>% group_by(evtype) %>% summarise(TotalPropDmg = sum(propDamage, na.rm = TRUE), TotalCropDmg = sum(cropDamage, na.rm = TRUE), TotalDamage = TotalPropDmg + TotalCropDmg)
+```
+
+### Remove events with 0 total damages and sort the subset by desc TotalDamage
+```{r}
+TotalEconomic <- TotalEconomic %>% filter(TotalDamage > 0) %>% arrange(desc(TotalDamage))
+
+#Fix the factor variable
+TotalEconomic$evtype <- factor(TotalEconomic$evtype)
+
+#Subset only top 5
+TotalEconomicTop <- TotalEconomic[1:5,]
+```
+
+# Results
+
+## Across the United States, which types of events are most harmful with respect to population health?
+```{r}
+library(ggplot2)
+library(reshape2)
+
+TotalHealthTopMelt <- melt(TotalHealthTop, id.vars = "evtype", variable.name = "HarmfulType")
+
+ggplot(TotalHealthTopMelt, aes(x = reorder(evtype, -value), y = value, fill = HarmfulType)) + geom_bar(stat="identity", position = "dodge") + labs(title = "Top 5 most harmful events to population health", x = "Event type", y = "Total fatalities/injuries")
+```
+
+## Across the United States, which types of events have the greatest economic consequences?
+```{r}
+TotalEconomicTopMelt <- melt(TotalEconomicTop, id.vars = "evtype", variable.name = "DamageType")
+
+ggplot(TotalEconomicTopMelt, aes(x = reorder(evtype, -value), y = value, fill = DamageType)) + geom_bar(stat="identity", position = "dodge") + labs(title = "Top 5 events having highest economic consequences", x = "Event type", y = "Total damage")
+```
